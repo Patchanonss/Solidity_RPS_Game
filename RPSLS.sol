@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity >=0.7.0 <0.9.0;
+pragma solidity >=0.8.2 <0.9.0;
 
 import "./CommitReveals.sol";
 import "./TimeUnit.sol";
@@ -7,8 +7,7 @@ import "./TimeUnit.sol";
 contract RPSLS is CommitReveal, TimeUnit {
     uint public numPlayer = 0;
     uint public reward = 0;
-    mapping(address => bytes32) public player_commit;  // ใช้เก็บ commit
-    mapping(address => uint) public player_choice; // 0 - Rock, 1 - Paper, 2 - Scissors, 3 - Lizard, 4 - Spock
+    mapping(address => uint) public player_choice;
     address[] public players;
     uint public revealDeadline;
     bool public gameActive = false;
@@ -34,17 +33,17 @@ contract RPSLS is CommitReveal, TimeUnit {
 
     function addPlayer() public payable onlyAllowedPlayers {
         require(numPlayer < 2, "Game already has 2 players.");
+        require(msg.value == 1 ether, "Entry fee is 1 ether.");
         if (numPlayer > 0) {
             require(msg.sender != players[0], "Same player cannot join twice.");
         }
-        require(msg.value == 1 ether, "Entry fee is 1 ether.");
 
         reward += msg.value;
         players.push(msg.sender);
         numPlayer++;
 
         if (numPlayer == 1) {
-            startTimer(5 minutes); // ถ้าไม่มี player 2 มาใน 5 นาที player 1 สามารถถอนเงินคืน
+            setStartTime(); // Start the timer if only one player joins
         }
 
         if (numPlayer == 2) {
@@ -55,23 +54,20 @@ contract RPSLS is CommitReveal, TimeUnit {
 
     function commitChoice(bytes32 commitHash) public onlyAllowedPlayers {
         require(numPlayer == 2, "Game is not full.");
-        require(player_commit[msg.sender] == bytes32(0), "Already committed.");
-
-        player_commit[msg.sender] = commitHash;
+        commit(commitHash);
     }
 
     function revealChoice(uint choice, string memory secret) public onlyAllowedPlayers {
         require(numPlayer == 2, "Game is not full.");
         require(block.timestamp <= revealDeadline, "Reveal period has ended.");
-        require(player_commit[msg.sender] != bytes32(0), "You have not committed.");
-        require(keccak256(abi.encodePacked(choice, secret)) == player_commit[msg.sender], "Commit does not match.");
-
+        require(commits[msg.sender].revealed == false, "Already revealed");
+        require(getHash(keccak256(abi.encodePacked(choice, secret))) == commits[msg.sender].commit, "Commit does not match.");
         require(choice >= 0 && choice <= 4, "Invalid choice.");
 
         player_choice[msg.sender] = choice;
-        player_commit[msg.sender] = bytes32(0);
+        commits[msg.sender].revealed = true;
 
-        if (player_choice[players[0]] != 0 || player_choice[players[1]] != 0) {
+        if (player_choice[players[0]] != 0 && player_choice[players[1]] != 0) {
             _checkWinnerAndPay();
         }
     }
@@ -122,7 +118,7 @@ contract RPSLS is CommitReveal, TimeUnit {
 
     function withdrawIfNoSecondPlayer() public {
         require(numPlayer == 1, "Both players have joined.");
-        require(block.timestamp > startTime + 5 minutes, "Wait time not exceeded.");
+        require(elapsedMinutes() >= 5, "Wait time not exceeded.");
         require(msg.sender == players[0], "Only first player can withdraw.");
 
         address payable account = payable(players[0]);
