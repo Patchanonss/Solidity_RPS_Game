@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.7.0 <0.9.0;
 
-import "./CommitReveal.sol";
+import "./CommitReveals.sol";
 import "./TimeUnit.sol";
 
 contract RPSLS is CommitReveal, TimeUnit {
@@ -64,4 +64,77 @@ contract RPSLS is CommitReveal, TimeUnit {
         require(numPlayer == 2, "Game is not full.");
         require(block.timestamp <= revealDeadline, "Reveal period has ended.");
         require(player_commit[msg.sender] != bytes32(0), "You have not committed.");
-        require(keccak256(abi.encodePacked(choice, secret)) == player_commit[msg.sender], "Commit does not match
+        require(keccak256(abi.encodePacked(choice, secret)) == player_commit[msg.sender], "Commit does not match.");
+
+        require(choice >= 0 && choice <= 4, "Invalid choice.");
+
+        player_choice[msg.sender] = choice;
+        player_commit[msg.sender] = bytes32(0);
+
+        if (player_choice[players[0]] != 0 || player_choice[players[1]] != 0) {
+            _checkWinnerAndPay();
+        }
+    }
+
+    function _checkWinnerAndPay() private {
+        uint p0Choice = player_choice[players[0]];
+        uint p1Choice = player_choice[players[1]];
+        address payable account0 = payable(players[0]);
+        address payable account1 = payable(players[1]);
+
+        if (_isWinner(p0Choice, p1Choice)) {
+            account0.transfer(reward);
+        } else if (_isWinner(p1Choice, p0Choice)) {
+            account1.transfer(reward);
+        } else {
+            account0.transfer(reward / 2);
+            account1.transfer(reward / 2);
+        }
+
+        _resetGame();
+    }
+
+    function _isWinner(uint choice1, uint choice2) private pure returns (bool) {
+        return (choice1 == 0 && (choice2 == 2 || choice2 == 3)) || // Rock > Scissors, Lizard
+               (choice1 == 1 && (choice2 == 0 || choice2 == 4)) || // Paper > Rock, Spock
+               (choice1 == 2 && (choice2 == 1 || choice2 == 3)) || // Scissors > Paper, Lizard
+               (choice1 == 3 && (choice2 == 1 || choice2 == 4)) || // Lizard > Paper, Spock
+               (choice1 == 4 && (choice2 == 0 || choice2 == 2));   // Spock > Rock, Scissors
+    }
+
+    function claimWinDueToTimeout() public {
+        require(gameActive, "Game is not active.");
+        require(block.timestamp > revealDeadline, "Reveal period not ended.");
+
+        address payable winner;
+        if (player_choice[players[0]] != 0) {
+            winner = payable(players[0]);
+        } else if (player_choice[players[1]] != 0) {
+            winner = payable(players[1]);
+        } else {
+            _resetGame();
+            return;
+        }
+
+        winner.transfer(reward);
+        _resetGame();
+    }
+
+    function withdrawIfNoSecondPlayer() public {
+        require(numPlayer == 1, "Both players have joined.");
+        require(block.timestamp > startTime + 5 minutes, "Wait time not exceeded.");
+        require(msg.sender == players[0], "Only first player can withdraw.");
+
+        address payable account = payable(players[0]);
+        account.transfer(reward);
+
+        _resetGame();
+    }
+
+    function _resetGame() private {
+        numPlayer = 0;
+        reward = 0;
+        delete players;
+        gameActive = false;
+    }
+}
